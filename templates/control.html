@@ -69,6 +69,21 @@
   <a class="logout" href="/logout">Sign Out</a>
 </header>
 
+    {% if ts_ip %}
+    <div style="background:#1a2a0a;border-bottom:1px solid #2ea043;padding:8px 20px;font-size:12px;color:#8b949e;display:flex;align-items:center;gap:10px;">
+      <span style="color:#3fb950;font-weight:600;">⬡ Tailscale</span>
+      <span>Container IP: <code style="color:#e3b341;background:#0d1117;padding:2px 6px;border-radius:4px;">{{ ts_ip }}</code></span>
+      <span style="color:#484f58;">|</span>
+      <span style="color:#f0883e;">⚠️ This IP changes on every Railway redeploy — update CDP_HOST if your local Tailscale IP changes too.</span>
+    </div>
+    {% else %}
+    <div style="background:#2a1a0a;border-bottom:1px solid #f0883e;padding:8px 20px;font-size:12px;color:#8b949e;display:flex;align-items:center;gap:10px;">
+      <span style="color:#f0883e;font-weight:600;">⬡ Tailscale</span>
+      <span>Not connected — set <code style="color:#e3b341;background:#0d1117;padding:2px 6px;border-radius:4px;">TS_AUTHKEY</code> in Railway env vars to enable VPN tunnel.</span>
+      <span style="color:#484f58;">|</span>
+      <span style="color:#f0883e;">⚠️ After each Railway redeploy the container gets a new Tailscale IP.</span>
+    </div>
+    {% endif %}
 <div class="main">
   <div class="sidebar">
     <div class="sidebar-header">
