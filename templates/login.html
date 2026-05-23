@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 40px 48px; width: 100%; max-width: 380px; }
+  .logo { text-align: center; margin-bottom: 24px; }
+  .logo svg { width: 48px; height: 48px; }
+  h1 { text-align: center; font-size: 20px; margin-bottom: 28px; color: #f0f6fc; }
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: #8b949e; margin-bottom: 6px; }
+  input { width: 100%; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 14px; outline: none; transition: border-color .2s; }
+  input:focus { border-color: #388bfd; }
+  button { width: 100%; padding: 11px; background: #238636; border: none; border-radius: 6px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; transition: background .2s; }
+  button:hover { background: #2ea043; }
+  .error { background: #3d1f1f; border: 1px solid #f85149; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #f85149; margin-bottom: 16px; }
+  .brand { font-size: 11px; color: #484f58; text-align: center; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="22" stroke="#388bfd" stroke-width="2"/>
+      <path d="M14 34V18l10-6 10 6v16" stroke="#388bfd" stroke-width="2" stroke-linejoin="round"/>
+      <rect x="20" y="24" width="8" height="10" rx="1" stroke="#388bfd" stroke-width="2"/>
+    </svg>
+  </div>
+  <h1>Harness Portal</h1>
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/login">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit">Sign In</button>
+  </form>
+  <div class="brand">CDP Browser Harness · Tailscale-connected</div>
+</div>
+</body>
+</html>
