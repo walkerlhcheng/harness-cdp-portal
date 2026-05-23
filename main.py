@@ -17,7 +17,10 @@ load_dotenv()
 
 app = FastAPI(title="CDP Harness Portal")
 templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files if directory exists
+    import pathlib
+    if pathlib.Path("static").exists():
+        app.mount("/static", StaticFiles(directory="static"), name="static")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-secret-key-xyz")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
