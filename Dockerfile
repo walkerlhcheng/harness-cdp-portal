@@ -1,29 +1,26 @@
 FROM python:3.11-slim
 
-# Install tailscale
-RUN apt-get update && apt-get install -y curl iptables iproute2 && \
-    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.nodesource.gpg | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg && \
-    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | sed 's|signed-by=.*|signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg|' > /etc/apt/sources.list.d/tailscale.list && \
-    apt-get update && apt-get install -y tailscale && \
-    rm -rf /var/lib/apt/lists/*
+    # Install system dependencies + Tailscale (official install script)
+    RUN apt-get update && apt-get install -y curl iptables iproute2 ca-certificates gnupg && \
+        curl -fsSL https://tailscale.com/install.sh | sh && \
+        rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+    # Install uv
+    COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-WORKDIR /app
+    WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml .
+    # Copy dependency files and install
+    COPY pyproject.toml .
+    RUN uv sync --no-dev
 
-# Install dependencies with uv
-RUN uv sync --no-dev
+    # Copy app files
+    COPY . .
 
-COPY . .
+    # Startup script
+    RUN chmod +x /app/start.sh
 
-# Startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+    EXPOSE 8000
 
-EXPOSE 8000
-
-CMD ["/start.sh"]
+    CMD ["/app/start.sh"]
+    
