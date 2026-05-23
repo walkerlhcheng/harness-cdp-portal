@@ -17,10 +17,10 @@ load_dotenv()
 
 app = FastAPI(title="CDP Harness Portal")
 templates = Jinja2Templates(directory="templates")
+
 # Mount static files if directory exists
-    import pathlib
-    if pathlib.Path("static").exists():
-        app.mount("/static", StaticFiles(directory="static"), name="static")
+if Path("static").exists():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-secret-key-xyz")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
@@ -97,7 +97,7 @@ async def index(request: Request):
     redir = require_auth(request)
     if redir:
         return redir
-    
+
     try:
         version = await cdp_version()
         targets = await cdp_list_targets()
@@ -106,7 +106,8 @@ async def index(request: Request):
         version = {"Browser": "Unreachable", "error": str(e)}
         targets = []
         cdp_ok = False
-    
+
+    ts_ip = os.environ.get("RAILWAY_TAILSCALE_IP", "")
     return templates.TemplateResponse("control.html", {
         "request": request,
         "cdp_ok": cdp_ok,
@@ -114,6 +115,7 @@ async def index(request: Request):
         "targets": targets,
         "cdp_host": CDP_HOST,
         "cdp_port": CDP_PORT,
+        "ts_ip": ts_ip,
     })
 
 @app.get("/api/targets")
@@ -198,20 +200,20 @@ async def ws_proxy(websocket: WebSocket, target_id: str):
     if not token or not verify_session_token(token):
         await websocket.close(code=4401)
         return
-    
+
     await websocket.accept()
     cdp_ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
-    
+
     try:
         async with websockets.connect(cdp_ws_url) as cdp_ws:
             async def forward_to_cdp():
                 async for msg in websocket.iter_text():
                     await cdp_ws.send(msg)
-            
+
             async def forward_to_client():
                 async for msg in cdp_ws:
                     await websocket.send_text(msg)
-            
+
             await asyncio.gather(forward_to_cdp(), forward_to_client())
     except (WebSocketDisconnect, Exception):
         pass
