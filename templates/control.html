@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness — Control Panel</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  .logo-text { font-weight: 700; font-size: 16px; color: #388bfd; }
+  .cdp-badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; }
+  .badge-ok { background: #1a3a1a; color: #3fb950; border: 1px solid #2ea043; }
+  .badge-err { background: #3d1f1f; color: #f85149; border: 1px solid #f85149; }
+  .spacer { flex: 1; }
+  .logout { font-size: 13px; color: #8b949e; text-decoration: none; padding: 6px 12px; border: 1px solid #30363d; border-radius: 6px; }
+  .logout:hover { color: #e6edf3; border-color: #8b949e; }
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .sidebar { width: 280px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 14px 16px; border-bottom: 1px solid #30363d; font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .06em; display: flex; justify-content: space-between; align-items: center; }
+  .btn-sm { font-size: 12px; padding: 4px 10px; background: #238636; border: none; border-radius: 5px; color: #fff; cursor: pointer; }
+  .btn-sm:hover { background: #2ea043; }
+  .target-list { overflow-y: auto; flex: 1; padding: 8px; }
+  .target-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; transition: all .15s; }
+  .target-item:hover { background: #1c2128; border-color: #30363d; }
+  .target-item.active { background: #1c2128; border-color: #388bfd; }
+  .target-title { font-size: 13px; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .target-url { font-size: 11px; color: #484f58; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .toolbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; gap: 8px; align-items: center; }
+  .url-bar { flex: 1; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 13px; outline: none; }
+  .url-bar:focus { border-color: #388bfd; }
+  .btn { padding: 8px 16px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all .15s; }
+  .btn:hover { background: #30363d; }
+  .btn-primary { background: #238636; border-color: #238636; }
+  .btn-primary:hover { background: #2ea043; }
+  .view-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #010409; }
+  .screenshot-area { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: flex-start; padding: 10px; }
+  #screenshot-img { max-width: 100%; border-radius: 4px; border: 1px solid #30363d; display: none; }
+  .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #484f58; flex-direction: column; gap: 12px; }
+  .console-area { height: 180px; background: #161b22; border-top: 1px solid #30363d; display: flex; flex-direction: column; }
+  .console-header { padding: 8px 14px; border-bottom: 1px solid #30363d; font-size: 12px; color: #8b949e; display: flex; justify-content: space-between; }
+  .console-output { flex: 1; overflow-y: auto; padding: 8px 14px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; line-height: 1.6; }
+  .console-input-row { display: flex; border-top: 1px solid #30363d; }
+  .console-input { flex: 1; background: #0d1117; border: none; padding: 8px 14px; color: #e6edf3; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; outline: none; }
+  .console-run { padding: 8px 16px; background: #21262d; border: none; border-left: 1px solid #30363d; color: #e6edf3; cursor: pointer; font-size: 12px; }
+  .console-run:hover { background: #30363d; }
+  .log-info { color: #8b949e; }
+  .log-ok { color: #3fb950; }
+  .log-err { color: #f85149; }
+  .log-result { color: #e3b341; }
+  .new-tab-row { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid #30363d; background: #161b22; }
+  .new-tab-input { flex: 1; padding: 7px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 13px; outline: none; }
+  .new-tab-input:focus { border-color: #388bfd; }
+  #no-target-msg { padding: 40px; text-align: center; color: #484f58; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-text">⬡ Harness</div>
+  <span class="cdp-badge {% if cdp_ok %}badge-ok{% else %}badge-err{% endif %}">
+    CDP {% if cdp_ok %}Connected{% else %}Disconnected{% endif %} · {{ cdp_host }}:{{ cdp_port }}
+  </span>
+  {% if cdp_ok %}
+  <span style="font-size:12px;color:#8b949e">{{ version.get("Browser","") }}</span>
+  {% endif %}
+  <div class="spacer"></div>
+  <a class="logout" href="/logout">Sign Out</a>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      Tabs
+      <button class="btn-sm" onclick="refreshTargets()">↻ Refresh</button>
+    </div>
+    <div class="target-list" id="target-list">
+      {% if not targets %}
+      <div style="padding:20px;color:#484f58;font-size:13px;text-align:center">No open tabs</div>
+      {% endif %}
+      {% for t in targets %}
+      {% if t.type == "page" %}
+      <div class="target-item" onclick="selectTarget('{{ t.id }}', this)" data-id="{{ t.id }}">
+        <div class="target-title">{{ t.title or "(untitled)" }}</div>
+        <div class="target-url">{{ t.url }}</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="new-tab-row">
+      <input class="new-tab-input" id="new-tab-url" type="text" placeholder="New tab URL…" value="https://">
+      <button class="btn btn-primary" onclick="openNewTab()">+ Tab</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="toolbar">
+      <button class="btn" onclick="goBack()">←</button>
+      <button class="btn" onclick="refresh()">↻</button>
+      <input class="url-bar" id="url-bar" type="text" placeholder="Select a tab first…" onkeydown="if(event.key==='Enter')navigate()">
+      <button class="btn btn-primary" onclick="navigate()">Go</button>
+      <button class="btn" onclick="takeScreenshot()">📷</button>
+    </div>
+
+    <div class="view-area">
+      <div class="screenshot-area" id="screenshot-area">
+        <img id="screenshot-img" alt="Screenshot">
+        <div class="placeholder" id="placeholder">
+          <div style="font-size:48px">🖥️</div>
+          <div>Select a tab and click 📷 to capture a screenshot</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="console-area">
+      <div class="console-header">
+        <span>JS Console</span>
+        <span id="active-target-label" style="color:#388bfd"></span>
+      </div>
+      <div class="console-output" id="console-output">
+        <div class="log-info">// Ready. Select a tab to start.</div>
+      </div>
+      <div class="console-input-row">
+        <input class="console-input" id="console-input" placeholder="document.title" onkeydown="if(event.key==='Enter')runJs()">
+        <button class="console-run" onclick="runJs()">▶ Run</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let activeTargetId = null;
+
+function log(msg, cls='log-info') {
+  const out = document.getElementById('console-output');
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = msg;
+  out.appendChild(d);
+  out.scrollTop = out.scrollHeight;
+}
+
+function selectTarget(id, el) {
+  document.querySelectorAll('.target-item').forEach(e => e.classList.remove('active'));
+  if (el) el.classList.add('active');
+  activeTargetId = id;
+  document.getElementById('active-target-label').textContent = 'Tab: ' + id.slice(0,8) + '…';
+  log('Selected tab: ' + id, 'log-ok');
+}
+
+async function refreshTargets() {
+  const r = await fetch('/api/targets');
+  const targets = await r.json();
+  const list = document.getElementById('target-list');
+  list.innerHTML = '';
+  const pages = targets.filter(t => t.type === 'page');
+  if (!pages.length) { list.innerHTML = '<div style="padding:20px;color:#484f58;font-size:13px;text-align:center">No open tabs</div>'; return; }
+  pages.forEach(t => {
+    const d = document.createElement('div');
+    d.className = 'target-item' + (t.id === activeTargetId ? ' active' : '');
+    d.dataset.id = t.id;
+    d.innerHTML = `<div class="target-title">${t.title || '(untitled)'}</div><div class="target-url">${t.url}</div>`;
+    d.onclick = () => selectTarget(t.id, d);
+    list.appendChild(d);
+  });
+}
+
+async function navigate() {
+  if (!activeTargetId) { log('No tab selected', 'log-err'); return; }
+  const url = document.getElementById('url-bar').value;
+  log('Navigating to ' + url, 'log-info');
+  const r = await fetch('/api/navigate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId, url}) });
+  const data = await r.json();
+  if (data.ok) { log('Navigated OK', 'log-ok'); setTimeout(takeScreenshot, 2000); }
+  else { log('Error: ' + data.error, 'log-err'); }
+}
+
+async function goBack() {
+  if (!activeTargetId) return;
+  await fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId, expression: 'history.back()'}) });
+  setTimeout(takeScreenshot, 1500);
+}
+
+async function refresh() {
+  if (!activeTargetId) return;
+  await fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId, expression: 'location.reload()'}) });
+  setTimeout(takeScreenshot, 2000);
+}
+
+async function takeScreenshot() {
+  if (!activeTargetId) { log('No tab selected', 'log-err'); return; }
+  log('Capturing screenshot…');
+  const r = await fetch('/api/screenshot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId}) });
+  const data = await r.json();
+  if (data.ok && data.image) {
+    const img = document.getElementById('screenshot-img');
+    img.src = 'data:image/jpeg;base64,' + data.image;
+    img.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    log('Screenshot captured ✓', 'log-ok');
+    // also update url bar
+    const res = await fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId, expression: 'location.href'}) });
+    const d2 = await res.json();
+    if (d2.ok && d2.result && d2.result.value) document.getElementById('url-bar').value = d2.result.value;
+  } else {
+    log('Error: ' + (data.error || 'unknown'), 'log-err');
+  }
+}
+
+async function runJs() {
+  if (!activeTargetId) { log('No tab selected', 'log-err'); return; }
+  const expr = document.getElementById('console-input').value;
+  if (!expr.trim()) return;
+  log('> ' + expr, 'log-info');
+  const r = await fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({targetId: activeTargetId, expression: expr}) });
+  const data = await r.json();
+  if (data.ok) {
+    const v = data.result;
+    const val = v.value !== undefined ? JSON.stringify(v.value) : (v.description || v.type);
+    log('← ' + val, 'log-result');
+  } else {
+    log('Error: ' + data.error, 'log-err');
+  }
+}
+
+async function openNewTab() {
+  const url = document.getElementById('new-tab-url').value || 'about:blank';
+  log('Opening new tab: ' + url);
+  const r = await fetch('/api/new-tab', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url}) });
+  const data = await r.json();
+  if (data.ok) { log('Tab opened: ' + data.tab.id, 'log-ok'); setTimeout(refreshTargets, 500); }
+  else { log('Error: ' + data.error, 'log-err'); }
+}
+
+// auto-refresh targets every 10s
+setInterval(refreshTargets, 10000);
+</script>
+</body>
+</html>
