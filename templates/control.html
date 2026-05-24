@@ -80,6 +80,38 @@
   .btn-health { background:#1c2a3a; border:1px solid #388bfd55; color:#388bfd; padding:8px 16px; border-radius:6px; font-size:13px; cursor:pointer; transition:all .15s; }
   .btn-health:hover { background:#21364e; border-color:#388bfd; }
 
+
+  /* ── Sample Tasks Panel ─────────────────────────────────────────── */
+  .tasks-overlay { display:none; position:fixed; inset:0; background:rgba(1,4,9,.78); z-index:9999; align-items:center; justify-content:center; }
+  .tasks-overlay.open { display:flex; }
+  .tasks-modal { background:#161b22; border:1px solid #30363d; border-radius:10px; width:640px; max-width:96vw; overflow:hidden; font-size:13px; }
+  .tasks-modal-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #30363d; }
+  .tasks-modal-title { font-weight:700; font-size:15px; color:#e6edf3; }
+  .tasks-close { background:none; border:none; color:#8b949e; font-size:18px; cursor:pointer; line-height:1; }
+  .tasks-close:hover { color:#e6edf3; }
+  .tasks-body { padding:18px; display:flex; flex-direction:column; gap:16px; }
+  .task-card { background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:16px; }
+  .task-card-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .task-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:20px; letter-spacing:.04em; }
+  .task-badge-nocdp { background:#1c2a3a; color:#388bfd; border:1px solid #388bfd55; }
+  .task-badge-cdp   { background:#1a3a1a; color:#3fb950; border:1px solid #2ea04355; }
+  .task-title { font-weight:600; color:#e6edf3; font-size:14px; }
+  .task-desc { font-size:12px; color:#8b949e; margin-bottom:10px; line-height:1.5; }
+  .task-url-row { display:flex; gap:8px; margin-bottom:10px; }
+  .task-url-input { flex:1; padding:7px 10px; background:#161b22; border:1px solid #30363d; border-radius:6px; color:#e6edf3; font-size:12px; outline:none; font-family:"SFMono-Regular",Consolas,monospace; }
+  .task-url-input:focus { border-color:#388bfd; }
+  .task-run-btn { padding:7px 16px; border:none; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; white-space:nowrap; }
+  .task-run-btn-blue { background:#1f6feb; color:#fff; }
+  .task-run-btn-blue:hover { background:#388bfd; }
+  .task-run-btn-green { background:#238636; color:#fff; }
+  .task-run-btn-green:hover { background:#2ea043; }
+  .task-output { font-family:"SFMono-Regular",Consolas,monospace; font-size:11.5px; background:#010409; border:1px solid #21262d; border-radius:6px; padding:10px; color:#8b949e; min-height:60px; max-height:200px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; }
+  .task-output.ok  { color:#3fb950; }
+  .task-output.err { color:#f85149; }
+  .task-screenshot { margin-top:10px; max-width:100%; border-radius:4px; border:1px solid #30363d; display:none; }
+  .btn-tasks { background:#1c2a1a; border:1px solid #2ea04355; color:#3fb950; padding:8px 16px; border-radius:6px; font-size:13px; cursor:pointer; transition:all .15s; }
+  .btn-tasks:hover { background:#21362a; border-color:#2ea043; }
+
 </style>
 </head>
 <body>
@@ -87,6 +119,7 @@
 <header>
   <div class="logo-text">⬡ Harness</div>
   <button class="btn-health" onclick="openHealth()">🔬 Health Test</button>
+  <button class="btn-tasks" onclick="openTasks()">🧪 Sample Tasks</button>
   <span class="cdp-badge {% if cdp_ok %}badge-ok{% else %}badge-err{% endif %}">
     CDP {% if cdp_ok %}Connected{% else %}Disconnected{% endif %} · {{ cdp_host }}:{{ cdp_port }}
   </span>
@@ -124,6 +157,55 @@
       <div style="text-align:center;padding:30px;color:#8b949e">
         <span class="health-spinner" style="font-size:28px">⟳</span><br><br>Running diagnostics…
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── Sample Tasks Overlay ──────────────────────────────────── -->
+<div class="tasks-overlay" id="tasks-overlay" onclick="if(event.target===this)closeTasks()">
+  <div class="tasks-modal">
+    <div class="tasks-modal-header">
+      <span class="tasks-modal-title">🧪 Sample Tasks</span>
+      <button class="tasks-close" onclick="closeTasks()">✕</button>
+    </div>
+    <div class="tasks-body">
+
+      <!-- Task 1: No browser automation -->
+      <div class="task-card">
+        <div class="task-card-header">
+          <span class="task-badge task-badge-nocdp">NO CDP</span>
+          <span class="task-title">Server-side URL Fetch</span>
+        </div>
+        <div class="task-desc">
+          The Railway container fetches a URL directly using <code>httpx</code> — no Chrome or CDP involved.
+          Returns HTTP status, content-type, size, and a 300-char preview.
+        </div>
+        <div class="task-url-row">
+          <input class="task-url-input" id="task1-url" value="https://example.com" placeholder="https://…">
+          <button class="task-run-btn task-run-btn-blue" onclick="runServerFetch()">▶ Run</button>
+        </div>
+        <div class="task-output log-info" id="task1-output">// Click Run to execute</div>
+      </div>
+
+      <!-- Task 2: Browser automation via CDP -->
+      <div class="task-card">
+        <div class="task-card-header">
+          <span class="task-badge task-badge-cdp">CDP</span>
+          <span class="task-title">Browser Scrape via CDP</span>
+        </div>
+        <div class="task-desc">
+          Opens a new Chrome tab via CDP, navigates to the URL, captures the page
+          <strong>title</strong> and a <strong>screenshot</strong> — full browser automation.
+        </div>
+        <div class="task-url-row">
+          <input class="task-url-input" id="task2-url" value="https://example.com" placeholder="https://…">
+          <button class="task-run-btn task-run-btn-green" onclick="runBrowserScrape()">▶ Run</button>
+        </div>
+        <div class="task-output log-info" id="task2-output">// Click Run to execute (CDP must be connected)</div>
+        <img class="task-screenshot" id="task2-screenshot" alt="Page screenshot">
+      </div>
+
     </div>
   </div>
 </div>
@@ -338,6 +420,81 @@ function renderHealth(d) {
     </div>`;
   }
   body.innerHTML = html;
+}
+
+
+function openTasks() { document.getElementById('tasks-overlay').classList.add('open'); }
+function closeTasks() { document.getElementById('tasks-overlay').classList.remove('open'); }
+
+async function runServerFetch() {
+  const url = document.getElementById('task1-url').value;
+  const out = document.getElementById('task1-output');
+  out.className = 'task-output log-info';
+  out.textContent = '// Fetching ' + url + ' from server…';
+  try {
+    const r = await fetch('/api/tasks/server-fetch', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      out.className = 'task-output ok';
+      out.textContent = [
+        '✅ Status:       ' + d.status,
+        '⏱  Elapsed:      ' + d.elapsed_ms + ' ms',
+        '📄 Content-Type: ' + d.content_type,
+        '📦 Size:         ' + d.content_length + ' bytes',
+        '🔗 Final URL:    ' + d.url,
+        '',
+        '── Preview (300 chars) ──',
+        d.preview,
+      ].join('\n');
+    } else {
+      out.className = 'task-output err';
+      out.textContent = '❌ Error: ' + d.error;
+    }
+  } catch(e) {
+    out.className = 'task-output err';
+    out.textContent = '❌ Request failed: ' + e;
+  }
+}
+
+async function runBrowserScrape() {
+  const url = document.getElementById('task2-url').value;
+  const out = document.getElementById('task2-output');
+  const img = document.getElementById('task2-screenshot');
+  out.className = 'task-output log-info';
+  out.textContent = '// Opening Chrome tab → ' + url + '\n// Waiting 2s for page load…';
+  img.style.display = 'none';
+  try {
+    const r = await fetch('/api/tasks/browser-scrape', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      out.className = 'task-output ok';
+      out.textContent = [
+        '✅ Tab ID:  ' + d.target_id,
+        '📝 Title:  ' + d.title,
+        '🔗 URL:    ' + d.url,
+        '',
+        d.screenshot ? '📷 Screenshot captured ↓' : '(no screenshot)',
+      ].join('\n');
+      if (d.screenshot) {
+        img.src = 'data:image/jpeg;base64,' + d.screenshot;
+        img.style.display = 'block';
+        // Also refresh sidebar tab list
+        setTimeout(refreshTargets, 500);
+      }
+    } else {
+      out.className = 'task-output err';
+      out.textContent = '❌ Error: ' + d.error;
+    }
+  } catch(e) {
+    out.className = 'task-output err';
+    out.textContent = '❌ Request failed: ' + e;
+  }
 }
 
 // auto-refresh targets every 10s
