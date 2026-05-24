@@ -18,7 +18,6 @@ load_dotenv()
 app = FastAPI(title="CDP Harness Portal")
 templates = Jinja2Templates(directory="templates")
 
-# Mount static files if directory exists
 if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -31,7 +30,7 @@ CDP_PORT   = int(os.environ.get("CDP_PORT", "19222"))
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 SESSION_COOKIE = "harness_session"
-SESSION_MAX_AGE = 3600 * 8  # 8 hours
+SESSION_MAX_AGE = 3600 * 8
 
 def make_session_token(username: str) -> str:
     return serializer.dumps(username, salt="session")
@@ -54,8 +53,6 @@ def require_auth(request: Request):
         return RedirectResponse("/login", status_code=302)
     return None
 
-# ── CDP helpers ────────────────────────────────────────────────────────────────
-
 async def cdp_list_targets():
     async with httpx.AsyncClient(timeout=5) as client:
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/list")
@@ -71,11 +68,13 @@ async def cdp_new_tab(url: str = "about:blank"):
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/new?{url}")
         return r.json()
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
-
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": None}
+    )
 
 @app.post("/login")
 async def do_login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -84,7 +83,11 @@ async def do_login(request: Request, username: str = Form(...), password: str = 
         resp = RedirectResponse("/", status_code=302)
         resp.set_cookie(SESSION_COOKIE, token, httponly=True, max_age=SESSION_MAX_AGE, samesite="lax")
         return resp
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": "Invalid credentials"}
+    )
 
 @app.get("/logout")
 async def logout():
@@ -108,15 +111,18 @@ async def index(request: Request):
         cdp_ok = False
 
     ts_ip = os.environ.get("RAILWAY_TAILSCALE_IP", "")
-    return templates.TemplateResponse("control.html", {
-        "request": request,
-        "cdp_ok": cdp_ok,
-        "version": version,
-        "targets": targets,
-        "cdp_host": CDP_HOST,
-        "cdp_port": CDP_PORT,
-        "ts_ip": ts_ip,
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="control.html",
+        context={
+            "cdp_ok": cdp_ok,
+            "version": version,
+            "targets": targets,
+            "cdp_host": CDP_HOST,
+            "cdp_port": CDP_PORT,
+            "ts_ip": ts_ip,
+        }
+    )
 
 @app.get("/api/targets")
 async def api_targets(request: Request):
@@ -195,7 +201,6 @@ async def api_new_tab(request: Request):
 
 @app.websocket("/ws/cdp/{target_id}")
 async def ws_proxy(websocket: WebSocket, target_id: str):
-    """WebSocket proxy: browser frontend <-> Chrome CDP"""
     token = websocket.cookies.get(SESSION_COOKIE)
     if not token or not verify_session_token(token):
         await websocket.close(code=4401)
