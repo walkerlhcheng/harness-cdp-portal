@@ -1,7 +1,9 @@
 import os
 import json
+import time
 import asyncio
 import base64
+import socket
 import httpx
 import websockets
 from pathlib import Path
@@ -17,8 +19,8 @@ load_dotenv()
 
 app = FastAPI(title="CDP Harness Portal")
 templates = Jinja2Templates(directory="templates")
-
-if Path("static").exists():
+import pathlib
+if pathlib.Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-secret-key-xyz")
@@ -30,7 +32,7 @@ CDP_PORT   = int(os.environ.get("CDP_PORT", "19222"))
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 SESSION_COOKIE = "harness_session"
-SESSION_MAX_AGE = 3600 * 8
+SESSION_MAX_AGE = 3600 * 8  # 8 hours
 
 def make_session_token(username: str) -> str:
     return serializer.dumps(username, salt="session")
@@ -53,6 +55,8 @@ def require_auth(request: Request):
         return RedirectResponse("/login", status_code=302)
     return None
 
+# ── CDP helpers ────────────────────────────────────────────────────────────────
+
 async def cdp_list_targets():
     async with httpx.AsyncClient(timeout=5) as client:
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/list")
@@ -68,13 +72,11 @@ async def cdp_new_tab(url: str = "about:blank"):
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/new?{url}")
         return r.json()
 
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="login.html",
-        context={"error": None}
-    )
+    return templates.TemplateResponse(request=request, name="login.html", context={"error": None})
 
 @app.post("/login")
 async def do_login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -83,11 +85,7 @@ async def do_login(request: Request, username: str = Form(...), password: str = 
         resp = RedirectResponse("/", status_code=302)
         resp.set_cookie(SESSION_COOKIE, token, httponly=True, max_age=SESSION_MAX_AGE, samesite="lax")
         return resp
-    return templates.TemplateResponse(
-        request=request,
-        name="login.html",
-        context={"error": "Invalid credentials"}
-    )
+    return templates.TemplateResponse(request=request, name="login.html", context={"error": "Invalid credentials"})
 
 @app.get("/logout")
 async def logout():
@@ -100,7 +98,7 @@ async def index(request: Request):
     redir = require_auth(request)
     if redir:
         return redir
-
+    
     try:
         version = await cdp_version()
         targets = await cdp_list_targets()
@@ -109,20 +107,24 @@ async def index(request: Request):
         version = {"Browser": "Unreachable", "error": str(e)}
         targets = []
         cdp_ok = False
+    
+    ts_ip = None
+    try:
+        import subprocess
+        result = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3)
+        if result.returncode == 0:
+            ts_ip = result.stdout.strip()
+    except Exception:
+        pass
 
-    ts_ip = os.environ.get("RAILWAY_TAILSCALE_IP", "")
-    return templates.TemplateResponse(
-        request=request,
-        name="control.html",
-        context={
-            "cdp_ok": cdp_ok,
-            "version": version,
-            "targets": targets,
-            "cdp_host": CDP_HOST,
-            "cdp_port": CDP_PORT,
-            "ts_ip": ts_ip,
-        }
-    )
+    return templates.TemplateResponse(request=request, name="control.html", context={
+        "cdp_ok": cdp_ok,
+        "version": version,
+        "targets": targets,
+        "cdp_host": CDP_HOST,
+        "cdp_port": CDP_PORT,
+        "ts_ip": ts_ip,
+    })
 
 @app.get("/api/targets")
 async def api_targets(request: Request):
@@ -199,26 +201,157 @@ async def api_new_tab(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# ── Connection Health Test ──────────────────────────────────────────────────────
+
+@app.get("/api/connection-health")
+async def api_connection_health(request: Request):
+    redir = require_auth(request)
+    if redir:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    checks = []
+    overall_ok = True
+
+    # ── Check 1: TCP port reachability ──────────────────────────────────────────
+    t0 = time.monotonic()
+    try:
+        loop = asyncio.get_event_loop()
+        conn = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: socket.create_connection((CDP_HOST, CDP_PORT), timeout=4)),
+            timeout=5
+        )
+        conn.close()
+        tcp_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "tcp", "label": "TCP Port Reachable", "ok": True,
+                        "detail": f"{CDP_HOST}:{CDP_PORT} responded in {tcp_ms} ms"})
+    except Exception as e:
+        tcp_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "tcp", "label": "TCP Port Reachable", "ok": False,
+                        "detail": f"Could not connect to {CDP_HOST}:{CDP_PORT} — {e}"})
+        overall_ok = False
+
+    # ── Check 2: CDP HTTP /json/version ────────────────────────────────────────
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/version")
+        ver = r.json()
+        v_ms = round((time.monotonic() - t0) * 1000)
+        browser_label = ver.get("Browser", "unknown")
+        checks.append({"id": "version", "label": "CDP /json/version", "ok": True,
+                        "detail": f"{browser_label} · {v_ms} ms"})
+    except Exception as e:
+        v_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "version", "label": "CDP /json/version", "ok": False,
+                        "detail": f"HTTP GET failed — {e}"})
+        overall_ok = False
+        ver = {}
+
+    # ── Check 3: CDP HTTP /json/list (count open tabs) ─────────────────────────
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/list")
+        targets = r.json()
+        pages = [t for t in targets if t.get("type") == "page"]
+        l_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "targets", "label": "CDP /json/list (open tabs)", "ok": True,
+                        "detail": f"{len(pages)} page target(s) found · {l_ms} ms"})
+    except Exception as e:
+        l_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "targets", "label": "CDP /json/list (open tabs)", "ok": False,
+                        "detail": f"HTTP GET failed — {e}"})
+        overall_ok = False
+        targets = []
+
+    # ── Check 4: WebSocket handshake ───────────────────────────────────────────
+    t0 = time.monotonic()
+    ws_debug_url = ver.get("webSocketDebuggerUrl", "")
+    if not ws_debug_url:
+        ws_debug_url = f"ws://{CDP_HOST}:{CDP_PORT}/json"
+    try:
+        async with websockets.connect(ws_debug_url, open_timeout=5) as ws:
+            ws_ms = round((time.monotonic() - t0) * 1000)
+            checks.append({"id": "websocket", "label": "WebSocket Handshake", "ok": True,
+                            "detail": f"Connected to {ws_debug_url} in {ws_ms} ms"})
+    except Exception as e:
+        ws_ms = round((time.monotonic() - t0) * 1000)
+        checks.append({"id": "websocket", "label": "WebSocket Handshake", "ok": False,
+                        "detail": f"WS connect failed — {e}"})
+        overall_ok = False
+
+    # ── Check 5: CDP round-trip (Browser.getVersion command) ───────────────────
+    t0 = time.monotonic()
+    pages = [t for t in targets if t.get("type") == "page"]
+    if pages:
+        page_ws = pages[0].get("webSocketDebuggerUrl", f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{pages[0]['id']}")
+        try:
+            async with websockets.connect(page_ws, open_timeout=5) as ws:
+                cmd = json.dumps({"id": 99, "method": "Runtime.evaluate",
+                                  "params": {"expression": "navigator.userAgent", "returnByValue": True}})
+                await ws.send(cmd)
+                resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=8))
+            rt_ms = round((time.monotonic() - t0) * 1000)
+            ua = resp.get("result", {}).get("result", {}).get("value", "")
+            checks.append({"id": "roundtrip", "label": "CDP Command Round-trip", "ok": True,
+                            "detail": f"Runtime.evaluate responded in {rt_ms} ms · UA: {ua[:80]}"})
+        except Exception as e:
+            rt_ms = round((time.monotonic() - t0) * 1000)
+            checks.append({"id": "roundtrip", "label": "CDP Command Round-trip", "ok": False,
+                            "detail": f"CDP command failed — {e}"})
+            overall_ok = False
+    else:
+        checks.append({"id": "roundtrip", "label": "CDP Command Round-trip", "ok": None,
+                        "detail": "Skipped — no open page targets to test against"})
+
+    # ── Check 6: Tailscale reachability ────────────────────────────────────────
+    try:
+        import subprocess
+        result = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            ts_data = json.loads(result.stdout)
+            self_ip = ts_data.get("Self", {}).get("TailscaleIPs", ["?"])[0]
+            peers = len(ts_data.get("Peer", {}))
+            checks.append({"id": "tailscale", "label": "Tailscale VPN Status", "ok": True,
+                            "detail": f"Container IP: {self_ip} · {peers} peer(s) in network"})
+        else:
+            checks.append({"id": "tailscale", "label": "Tailscale VPN Status", "ok": False,
+                            "detail": f"tailscale status returned code {result.returncode}"})
+    except Exception as e:
+        checks.append({"id": "tailscale", "label": "Tailscale VPN Status", "ok": False,
+                        "detail": f"Tailscale CLI unavailable — {e}"})
+
+    return JSONResponse({
+        "ok": overall_ok,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cdp_host": CDP_HOST,
+        "cdp_port": CDP_PORT,
+        "checks": checks,
+    })
+
+# ── WebSocket CDP proxy ─────────────────────────────────────────────────────────
+
 @app.websocket("/ws/cdp/{target_id}")
 async def ws_proxy(websocket: WebSocket, target_id: str):
+    """WebSocket proxy: browser frontend <-> Chrome CDP"""
     token = websocket.cookies.get(SESSION_COOKIE)
     if not token or not verify_session_token(token):
         await websocket.close(code=4401)
         return
-
+    
     await websocket.accept()
     cdp_ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
-
+    
     try:
         async with websockets.connect(cdp_ws_url) as cdp_ws:
             async def forward_to_cdp():
                 async for msg in websocket.iter_text():
                     await cdp_ws.send(msg)
-
+            
             async def forward_to_client():
                 async for msg in cdp_ws:
                     await websocket.send_text(msg)
-
+            
             await asyncio.gather(forward_to_cdp(), forward_to_client())
     except (WebSocketDisconnect, Exception):
         pass
