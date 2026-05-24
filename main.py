@@ -6,6 +6,7 @@ import base64
 import socket
 import httpx
 import websockets
+from python_socks.async_.asyncio import Proxy as SocksProxy
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Form, Response, WebSocket, WebSocketDisconnect
@@ -28,6 +29,21 @@ ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "harness123")
 CDP_HOST   = os.environ.get("CDP_HOST", "100.113.104.72")
 CDP_PORT   = int(os.environ.get("CDP_PORT", "19222"))
+# When Tailscale is active, route CDP traffic through its SOCKS5 proxy
+SOCKS5_PROXY = "socks5://127.0.0.1:1055" if os.environ.get("TS_AUTHKEY") else None
+
+async def _ws_connect(url: str, **kwargs):
+    """websockets.connect wrapper that routes through Tailscale SOCKS5 proxy when active."""
+    if not SOCKS5_PROXY:
+        return websockets.connect(url, **kwargs)
+    import re as _re
+    m = _re.match(r"wss?://([^:/]+):?(\d+)?", url)
+    host = m.group(1) if m else url
+    port = int(m.group(2)) if m and m.group(2) else 80
+    proxy = SocksProxy.from_url(SOCKS5_PROXY)
+    sock = await proxy.connect(dest_host=host, dest_port=port)
+    return websockets.connect(url, sock=sock, **kwargs)
+
 
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
@@ -58,17 +74,17 @@ def require_auth(request: Request):
 # ── CDP helpers ────────────────────────────────────────────────────────────────
 
 async def cdp_list_targets():
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=5, proxy=SOCKS5_PROXY) as client:
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/list")
         return r.json()
 
 async def cdp_version():
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=5, proxy=SOCKS5_PROXY) as client:
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/version")
         return r.json()
 
 async def cdp_new_tab(url: str = "about:blank"):
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=5, proxy=SOCKS5_PROXY) as client:
         r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/new?{url}")
         return r.json()
 
@@ -147,7 +163,7 @@ async def api_navigate(request: Request):
     url = body.get("url", "about:blank")
     try:
         ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
-        async with websockets.connect(ws_url) as ws:
+        async with await _ws_connect(ws_url) as ws:
             await ws.send(json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": url}}))
             result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
         return JSONResponse({"ok": True, "result": result})
@@ -163,7 +179,7 @@ async def api_screenshot(request: Request):
     target_id = body.get("targetId")
     try:
         ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
-        async with websockets.connect(ws_url) as ws:
+        async with await _ws_connect(ws_url) as ws:
             await ws.send(json.dumps({"id": 1, "method": "Page.captureScreenshot", "params": {"format": "jpeg", "quality": 70}}))
             result = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         data = result.get("result", {}).get("data", "")
@@ -181,7 +197,7 @@ async def api_evaluate(request: Request):
     expression = body.get("expression", "document.title")
     try:
         ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
-        async with websockets.connect(ws_url) as ws:
+        async with await _ws_connect(ws_url) as ws:
             await ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expression, "returnByValue": True}}))
             result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
         return JSONResponse({"ok": True, "result": result.get("result", {})})
@@ -233,7 +249,7 @@ async def api_connection_health(request: Request):
     # ── Check 2: CDP HTTP /json/version ────────────────────────────────────────
     t0 = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, proxy=SOCKS5_PROXY) as client:
             r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/version")
         ver = r.json()
         v_ms = round((time.monotonic() - t0) * 1000)
@@ -250,7 +266,7 @@ async def api_connection_health(request: Request):
     # ── Check 3: CDP HTTP /json/list (count open tabs) ─────────────────────────
     t0 = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, proxy=SOCKS5_PROXY) as client:
             r = await client.get(f"http://{CDP_HOST}:{CDP_PORT}/json/list")
         targets = r.json()
         pages = [t for t in targets if t.get("type") == "page"]
@@ -270,7 +286,7 @@ async def api_connection_health(request: Request):
     if not ws_debug_url:
         ws_debug_url = f"ws://{CDP_HOST}:{CDP_PORT}/json"
     try:
-        async with websockets.connect(ws_debug_url, open_timeout=5) as ws:
+        async with await _ws_connect(ws_debug_url, open_timeout=5) as ws:
             ws_ms = round((time.monotonic() - t0) * 1000)
             checks.append({"id": "websocket", "label": "WebSocket Handshake", "ok": True,
                             "detail": f"Connected to {ws_debug_url} in {ws_ms} ms"})
@@ -286,7 +302,7 @@ async def api_connection_health(request: Request):
     if pages:
         page_ws = pages[0].get("webSocketDebuggerUrl", f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{pages[0]['id']}")
         try:
-            async with websockets.connect(page_ws, open_timeout=5) as ws:
+            async with await _ws_connect(page_ws, open_timeout=5) as ws:
                 cmd = json.dumps({"id": 99, "method": "Runtime.evaluate",
                                   "params": {"expression": "navigator.userAgent", "returnByValue": True}})
                 await ws.send(cmd)
@@ -343,7 +359,7 @@ async def ws_proxy(websocket: WebSocket, target_id: str):
     cdp_ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
     
     try:
-        async with websockets.connect(cdp_ws_url) as cdp_ws:
+        async with await _ws_connect(cdp_ws_url) as cdp_ws:
             async def forward_to_cdp():
                 async for msg in websocket.iter_text():
                     await cdp_ws.send(msg)
