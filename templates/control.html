@@ -304,7 +304,7 @@ async function runHealthCheck() {
   const body = document.getElementById('health-body');
   body.innerHTML = '<div style="text-align:center;padding:30px;color:#8b949e"><span class="health-spinner" style="font-size:28px">⟳</span><br><br>Running diagnostics…</div>';
   try {
-    const r = await fetch('/api/connection-health');
+    const r = await fetch('/api/connection-health', {credentials: 'include'});
     const d = await r.json();
     renderHealth(d);
   } catch(e) {
