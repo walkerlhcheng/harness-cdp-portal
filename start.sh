@@ -4,6 +4,8 @@ set -e
 # ─── Tailscale (only if TS_AUTHKEY is set) ───────────────────────────────────
 if [ -n "$TS_AUTHKEY" ]; then
   echo "[harness] Starting tailscaled (userspace mode)..."
+  # --socks5-server exposes the Tailscale network as a SOCKS5 proxy on port 1055
+  # Python app (main.py) uses this proxy directly for all CDP HTTP + WebSocket calls
   tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1056 &
   TSPID=$!
 
@@ -24,25 +26,8 @@ if [ -n "$TS_AUTHKEY" ]; then
 
   TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
   echo "[harness] Tailscale up — this container IP: ${TS_IP}"
-  echo "[harness] ⚠️  NOTE: This Tailscale IP changes on every Railway redeploy!"
-  echo "[harness]    Update CDP_HOST in Railway env vars if local machine IP changed."
+  echo "[harness] SOCKS5 proxy active on localhost:1055 — Python app will route CDP traffic through it"
   export RAILWAY_TAILSCALE_IP="${TS_IP}"
-
-  # ─── socat bridge: local 19222 → SOCKS5 proxy → remote CDP host ──────────
-  # This allows the Python app to connect to 127.0.0.1:19222 while socat
-  # tunnels the traffic through the Tailscale SOCKS5 proxy to the real target.
-  REMOTE_CDP_HOST="${CDP_HOST:-100.113.104.72}"
-  REMOTE_CDP_PORT="${CDP_PORT:-19222}"
-
-  echo "[harness] Starting socat bridge: 127.0.0.1:${REMOTE_CDP_PORT} → SOCKS5 → ${REMOTE_CDP_HOST}:${REMOTE_CDP_PORT}"
-  socat TCP4-LISTEN:${REMOTE_CDP_PORT},fork,reuseaddr \
-    SOCKS5:127.0.0.1:${REMOTE_CDP_HOST}:${REMOTE_CDP_PORT},socksport=1055 &
-  SOCAT_PID=$!
-  echo "[harness] socat bridge PID: ${SOCAT_PID}"
-
-  # Override CDP_HOST so the app connects through the bridge instead of direct IP
-  export CDP_HOST=127.0.0.1
-  echo "[harness] CDP_HOST overridden to 127.0.0.1 (socat bridge active)"
 
 else
   echo "[harness] No TS_AUTHKEY set — Tailscale skipped (CDP must be reachable directly)"
