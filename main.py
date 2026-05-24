@@ -372,6 +372,85 @@ async def ws_proxy(websocket: WebSocket, target_id: str):
     except (WebSocketDisconnect, Exception):
         pass
 
+# ── Sample Tasks ────────────────────────────────────────────────────────────────
+
+@app.post("/api/tasks/server-fetch")
+async def task_server_fetch(request: Request):
+    """Sample Task 1 — No browser automation.
+    The Railway container directly fetches a URL using httpx and returns
+    status, headers, and a content preview. No Chrome / CDP involved.
+    """
+    redir = require_auth(request)
+    if redir:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    body = await request.json()
+    url = body.get("url", "https://example.com")
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            r = await client.get(url)
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        return JSONResponse({
+            "ok": True,
+            "task": "server-fetch",
+            "url": str(r.url),
+            "status": r.status_code,
+            "elapsed_ms": elapsed_ms,
+            "content_type": r.headers.get("content-type", ""),
+            "content_length": len(r.content),
+            "preview": r.text[:300],
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "task": "server-fetch", "error": str(e)}, status_code=500)
+
+
+@app.post("/api/tasks/browser-scrape")
+async def task_browser_scrape(request: Request):
+    """Sample Task 2 — Browser automation via CDP.
+    Opens a new Chrome tab, navigates to a URL, waits for load,
+    captures the page title + screenshot via CDP.
+    """
+    redir = require_auth(request)
+    if redir:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    body = await request.json()
+    url = body.get("url", "https://example.com")
+    try:
+        # 1. Open a new tab via CDP HTTP API
+        tab = await cdp_new_tab(url)
+        target_id = tab.get("id")
+        if not target_id:
+            return JSONResponse({"ok": False, "error": "Failed to open tab"}, status_code=500)
+
+        # 2. Wait briefly for page to load
+        await asyncio.sleep(2)
+
+        # 3. Extract page title via CDP WebSocket
+        ws_url = f"ws://{CDP_HOST}:{CDP_PORT}/devtools/page/{target_id}"
+        async with await _ws_connect(ws_url) as ws:
+            await ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
+                                      "params": {"expression": "document.title", "returnByValue": True}}))
+            title_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            title = title_resp.get("result", {}).get("result", {}).get("value", "")
+
+            # 4. Capture screenshot
+            await ws.send(json.dumps({"id": 2, "method": "Page.captureScreenshot",
+                                      "params": {"format": "jpeg", "quality": 70}}))
+            shot_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+            screenshot_b64 = shot_resp.get("result", {}).get("data", "")
+
+        return JSONResponse({
+            "ok": True,
+            "task": "browser-scrape",
+            "target_id": target_id,
+            "url": url,
+            "title": title,
+            "screenshot": screenshot_b64,
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "task": "browser-scrape", "error": str(e)}, status_code=500)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
