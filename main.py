@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import uvicorn
+from browser_use import Agent, Browser
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
@@ -449,6 +451,55 @@ async def task_browser_scrape(request: Request):
         })
     except Exception as e:
         return JSONResponse({"ok": False, "task": "browser-scrape", "error": str(e)}, status_code=500)
+
+
+@app.post("/run")
+async def run_task(request: Request):
+    """Browser Use Agent Task
+    Runs an LLM agent on the browser using browser-use and gemini-2.0-flash.
+    """
+    redir = require_auth(request)
+    if redir:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    body = await request.json()
+    url = body.get("url", "https://example.com")
+    instruction = body.get("instruction", "Tell me what you see on the page")
+
+    try:
+        if CDP_HOST:
+            # When Tailscale proxy is active, we might need to route through it.
+            # browser-use wraps Playwright connect_over_cdp. Playwright doesn't inherently use our python-socks proxy.
+            # We'll construct the CDP URL.
+            cdp_url = f"http://{CDP_HOST}:{CDP_PORT}"
+            browser = Browser(cdp_url=cdp_url)
+        else:
+            browser = Browser()
+
+        llm = ChatGoogleGenerativeAI(model='gemini-2.0-flash')
+        full_task = f"Go to {url} and {instruction}"
+        agent = Agent(task=full_task, llm=llm, browser=browser)
+
+        result = await agent.run(max_steps=10)
+        await browser.close()
+
+        summary = "Task completed successfully."
+        if result.history and len(result.history) > 0:
+            final_result = result.history[-1].result
+            if final_result and final_result[-1].extracted_content:
+                summary = final_result[-1].extracted_content
+            elif final_result and final_result[-1].error:
+                summary = f"Error: {final_result[-1].error}"
+
+        return JSONResponse({
+            "ok": True,
+            "task": "agent-run",
+            "url": url,
+            "instruction": instruction,
+            "summary": summary
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "task": "agent-run", "error": str(e)}, status_code=500)
 
 
 @app.get("/health")

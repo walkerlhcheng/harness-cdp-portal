@@ -206,6 +206,23 @@
         <img class="task-screenshot" id="task2-screenshot" alt="Page screenshot">
       </div>
 
+      <!-- Task 3: AI Agent via Browser-Use -->
+      <div class="task-card">
+        <div class="task-card-header">
+          <span class="task-badge task-badge-cdp">AI AGENT</span>
+          <span class="task-title">LLM Browser Control</span>
+        </div>
+        <div class="task-desc">
+          Uses <strong>Gemini 2.0 Flash</strong> + <strong>browser-use</strong> to control the browser and achieve a task.
+        </div>
+        <div class="task-url-row" style="flex-direction: column;">
+          <input class="task-url-input" id="task3-url" value="https://example.com" placeholder="Task URL…">
+          <input class="task-url-input" id="task3-instruction" value="Tell me what you see on the page" placeholder="Instruction…">
+          <button class="task-run-btn task-run-btn-green" onclick="runAiTask()" style="margin-top: 5px;">▶ Run Task</button>
+        </div>
+        <div class="task-output log-info" id="task3-output">// Click Run Task to execute</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -487,6 +504,38 @@ async function runBrowserScrape() {
         // Also refresh sidebar tab list
         setTimeout(refreshTargets, 500);
       }
+    } else {
+      out.className = 'task-output err';
+      out.textContent = '❌ Error: ' + d.error;
+    }
+  } catch(e) {
+    out.className = 'task-output err';
+    out.textContent = '❌ Request failed: ' + e;
+  }
+}
+
+async function runAiTask() {
+  const url = document.getElementById('task3-url').value;
+  const instruction = document.getElementById('task3-instruction').value;
+  const out = document.getElementById('task3-output');
+  out.className = 'task-output log-info';
+  out.textContent = '// Starting AI Agent...\n// URL: ' + url + '\n// Instruction: ' + instruction + '\n// This may take 30-60 seconds...';
+  try {
+    const r = await fetch('/run', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url, instruction})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      out.className = 'task-output ok';
+      out.textContent = [
+        '✅ Task Completed',
+        '🔗 Target URL: ' + d.url,
+        '📝 Instruction: ' + d.instruction,
+        '',
+        '── Result Summary ──',
+        d.summary,
+      ].join('\n');
     } else {
       out.className = 'task-output err';
       out.textContent = '❌ Error: ' + d.error;
