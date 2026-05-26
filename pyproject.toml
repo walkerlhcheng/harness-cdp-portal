@@ -14,6 +14,10 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "starlette>=0.37.2",
     "python-socks[asyncio]>=2.4.0",
+    "browser-use",
+    "langchain-google-genai",
+    "playwright",
+    "pillow",
 ]
 
 [tool.uv]
